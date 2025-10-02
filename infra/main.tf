@@ -5,10 +5,6 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 5.0"
     }
-    archive = {
-      source  = "hashicorp/archive"
-      version = "~> 2.4"
-    }
   }
 }
 
@@ -19,7 +15,7 @@ provider "aws" {
 variable "aws_region" {
   description = "AWS region"
   type        = string
-  default     = "eu-west-1"
+  default     = "eu-central-1"
 }
 
 variable "project_name" {
@@ -28,24 +24,9 @@ variable "project_name" {
   default     = "pdf-compressor"
 }
 
-# Kompilacja TypeScript do JavaScript
-resource "null_resource" "build_lambda" {
-  triggers = {
-    code_hash = filebase64sha256("../src/lambda/index.ts")
-  }
-
-  provisioner "local-exec" {
-    command = "cd .. && npm run build"
-  }
-}
-
-# Archiwum ZIP z kodem Lambda
-data "archive_file" "lambda_zip" {
-  type        = "zip"
-  source_dir  = "../dist"
-  output_path = "lambda-deployment.zip"
-  
-  depends_on = [null_resource.build_lambda]
+# ZIP z kodem Lambda (musi być wcześniej przygotowany przez npm run package)
+data "local_file" "lambda_zip" {
+  filename = "../lambda-deployment.zip"
 }
 
 # IAM Role dla Lambda
@@ -74,15 +55,15 @@ resource "aws_iam_role_policy_attachment" "lambda_basic_execution" {
 
 # Lambda Function
 resource "aws_lambda_function" "pdf_compressor" {
-  filename         = data.archive_file.lambda_zip.output_path
+  filename         = data.local_file.lambda_zip.filename
   function_name    = var.project_name
   role            = aws_iam_role.lambda_role.arn
-  handler         = "index.handler"
+  handler         = "src/lambda/index.handler"
   runtime         = "nodejs18.x"
   timeout         = 30
   memory_size     = 512
 
-  source_code_hash = data.archive_file.lambda_zip.output_base64sha256
+  source_code_hash = filebase64sha256(data.local_file.lambda_zip.filename)
 
   environment {
     variables = {

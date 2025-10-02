@@ -5,6 +5,8 @@
   "main": "index.js",
   "scripts": {
     "build": "tsc",
+    "package": "npm run build && cd dist && zip -r ../lambda-deployment.zip .",
+    "deploy": "npm run package && cd infra && terraform apply -auto-approve",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "repository": {
