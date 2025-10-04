@@ -53,7 +53,14 @@ resource "aws_iam_role_policy_attachment" "lambda_basic_execution" {
   role       = aws_iam_role.lambda_role.name
 }
 
-# Lambda Function
+# API Gateway API Key
+resource "aws_api_gateway_api_key" "pdf_compressor_key" {
+  name        = "${var.project_name}-api-key"
+  description = "API Key for PDF Compressor"
+  enabled     = true
+}
+
+# Main Lambda Function
 resource "aws_lambda_function" "pdf_compressor" {
   filename         = data.local_file.lambda_zip.filename
   function_name    = var.project_name
@@ -72,25 +79,82 @@ resource "aws_lambda_function" "pdf_compressor" {
   }
 }
 
-# API Gateway
-resource "aws_apigatewayv2_api" "lambda_api" {
-  name          = "${var.project_name}-api"
-  protocol_type = "HTTP"
+# REST API Gateway (v1 - wspiera natywne API Keys)
+resource "aws_api_gateway_rest_api" "lambda_api" {
+  name        = "${var.project_name}-api"
+  description = "API Gateway for PDF Compressor"
   
-  cors_configuration {
-    allow_credentials = false
-    allow_headers     = ["content-type", "x-amz-date", "authorization", "x-api-key"]
-    allow_methods     = ["*"]
-    allow_origins     = ["*"]
-    max_age          = 86400
+  endpoint_configuration {
+    types = ["REGIONAL"]
+  }
+}
+
+# API Gateway Resource (proxy)
+resource "aws_api_gateway_resource" "proxy" {
+  rest_api_id = aws_api_gateway_rest_api.lambda_api.id
+  parent_id   = aws_api_gateway_rest_api.lambda_api.root_resource_id
+  path_part   = "{proxy+}"
+}
+
+# API Gateway Method (ANY dla root)
+resource "aws_api_gateway_method" "proxy_root" {
+  rest_api_id   = aws_api_gateway_rest_api.lambda_api.id
+  resource_id   = aws_api_gateway_rest_api.lambda_api.root_resource_id
+  http_method   = "ANY"
+  authorization = "NONE"
+  api_key_required = true
+}
+
+# API Gateway Method (ANY dla proxy)
+resource "aws_api_gateway_method" "proxy" {
+  rest_api_id   = aws_api_gateway_rest_api.lambda_api.id
+  resource_id   = aws_api_gateway_resource.proxy.id
+  http_method   = "ANY"
+  authorization = "NONE"
+  api_key_required = true
+}
+
+# API Gateway Integration (root)
+resource "aws_api_gateway_integration" "lambda_root" {
+  rest_api_id = aws_api_gateway_rest_api.lambda_api.id
+  resource_id = aws_api_gateway_method.proxy_root.resource_id
+  http_method = aws_api_gateway_method.proxy_root.http_method
+
+  integration_http_method = "POST"
+  type                   = "AWS_PROXY"
+  uri                    = aws_lambda_function.pdf_compressor.invoke_arn
+}
+
+# API Gateway Integration (proxy)
+resource "aws_api_gateway_integration" "lambda" {
+  rest_api_id = aws_api_gateway_rest_api.lambda_api.id
+  resource_id = aws_api_gateway_method.proxy.resource_id
+  http_method = aws_api_gateway_method.proxy.http_method
+
+  integration_http_method = "POST"
+  type                   = "AWS_PROXY"
+  uri                    = aws_lambda_function.pdf_compressor.invoke_arn
+}
+
+# API Gateway Deployment
+resource "aws_api_gateway_deployment" "lambda" {
+  depends_on = [
+    aws_api_gateway_integration.lambda,
+    aws_api_gateway_integration.lambda_root,
+  ]
+
+  rest_api_id = aws_api_gateway_rest_api.lambda_api.id
+
+  lifecycle {
+    create_before_destroy = true
   }
 }
 
 # API Gateway Stage
-resource "aws_apigatewayv2_stage" "lambda_stage" {
-  api_id      = aws_apigatewayv2_api.lambda_api.id
-  name        = "prod"
-  auto_deploy = true
+resource "aws_api_gateway_stage" "prod" {
+  deployment_id = aws_api_gateway_deployment.lambda.id
+  rest_api_id   = aws_api_gateway_rest_api.lambda_api.id
+  stage_name    = "prod"
 }
 
 # Lambda Permission dla API Gateway
@@ -99,38 +163,55 @@ resource "aws_lambda_permission" "api_gateway" {
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.pdf_compressor.function_name
   principal     = "apigateway.amazonaws.com"
-  source_arn    = "${aws_apigatewayv2_api.lambda_api.execution_arn}/*/*"
+  source_arn    = "${aws_api_gateway_rest_api.lambda_api.execution_arn}/*/*"
 }
 
-# API Gateway Integration
-resource "aws_apigatewayv2_integration" "lambda_integration" {
-  api_id             = aws_apigatewayv2_api.lambda_api.id
-  integration_type   = "AWS_PROXY"
-  integration_method = "POST"
-  integration_uri    = aws_lambda_function.pdf_compressor.invoke_arn
+# Usage Plan z rate limiting
+resource "aws_api_gateway_usage_plan" "main" {
+  name         = "${var.project_name}-usage-plan"
+  description  = "Usage plan for PDF Compressor API"
+
+  api_stages {
+    api_id = aws_api_gateway_rest_api.lambda_api.id
+    stage  = aws_api_gateway_stage.prod.stage_name
+  }
+
+  throttle_settings {
+    rate_limit  = 100   # 100 requests per second
+    burst_limit = 200   # burst up to 200 requests
+  }
+
+  quota_settings {
+    limit  = 10000      # 10,000 requests per month
+    period = "MONTH"
+  }
 }
 
-# API Gateway Route
-resource "aws_apigatewayv2_route" "lambda_route" {
-  api_id    = aws_apigatewayv2_api.lambda_api.id
-  route_key = "ANY /{proxy+}"
-  target    = "integrations/${aws_apigatewayv2_integration.lambda_integration.id}"
-}
-
-# Default route
-resource "aws_apigatewayv2_route" "lambda_default_route" {
-  api_id    = aws_apigatewayv2_api.lambda_api.id
-  route_key = "ANY /"
-  target    = "integrations/${aws_apigatewayv2_integration.lambda_integration.id}"
+# Połączenie API Key z Usage Plan
+resource "aws_api_gateway_usage_plan_key" "main" {
+  key_id        = aws_api_gateway_api_key.pdf_compressor_key.id
+  key_type      = "API_KEY"
+  usage_plan_id = aws_api_gateway_usage_plan.main.id
 }
 
 # Outputs
 output "api_gateway_url" {
   description = "URL of the API Gateway"
-  value       = aws_apigatewayv2_stage.lambda_stage.invoke_url
+  value       = aws_api_gateway_stage.prod.invoke_url
+}
+
+output "api_key" {
+  description = "API Key for authorization (use in x-api-key header)"
+  value       = aws_api_gateway_api_key.pdf_compressor_key.value
+  sensitive   = true
 }
 
 output "lambda_function_name" {
   description = "Name of the Lambda function"
   value       = aws_lambda_function.pdf_compressor.function_name
+}
+
+output "usage_plan_id" {
+  description = "Usage Plan ID"
+  value       = aws_api_gateway_usage_plan.main.id
 }
