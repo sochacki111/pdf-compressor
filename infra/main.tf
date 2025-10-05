@@ -24,6 +24,12 @@ variable "project_name" {
   default     = "pdf-compressor"
 }
 
+variable "ADDY_API_KEY" {
+  description = "Addy.io API Key for email aliases"
+  type        = string
+  sensitive   = true
+}
+
 # ZIP z kodem Lambda (musi być wcześniej przygotowany przez npm run package)
 data "local_file" "lambda_zip" {
   filename = "../lambda-deployment.zip"
@@ -60,12 +66,12 @@ resource "aws_api_gateway_api_key" "pdf_compressor_key" {
   enabled     = true
 }
 
-# Main Lambda Function
+# PDF Compressor Lambda Function
 resource "aws_lambda_function" "pdf_compressor" {
   filename         = data.local_file.lambda_zip.filename
   function_name    = var.project_name
   role            = aws_iam_role.lambda_role.arn
-  handler         = "src/lambda/index.handler"
+  handler         = "src/features/pdf-compressor/lambda/index.handler"
   runtime         = "nodejs18.x"
   timeout         = 30
   memory_size     = 512
@@ -75,6 +81,26 @@ resource "aws_lambda_function" "pdf_compressor" {
   environment {
     variables = {
       NODE_ENV = "production"
+    }
+  }
+}
+
+# Email Aliases Lambda Function
+resource "aws_lambda_function" "email_aliases" {
+  filename         = data.local_file.lambda_zip.filename
+  function_name    = "${var.project_name}-email-aliases"
+  role            = aws_iam_role.lambda_role.arn
+  handler         = "src/features/email-aliases/lambda/index.handler"
+  runtime         = "nodejs18.x"
+  timeout         = 30
+  memory_size     = 256
+
+  source_code_hash = filebase64sha256(data.local_file.lambda_zip.filename)
+
+  environment {
+    variables = {
+      NODE_ENV = "production"
+      ADDY_API_KEY = var.ADDY_API_KEY
     }
   }
 }
@@ -96,6 +122,13 @@ resource "aws_api_gateway_resource" "proxy" {
   path_part   = "{proxy+}"
 }
 
+# API Gateway Resource (email-aliases)
+resource "aws_api_gateway_resource" "email_aliases" {
+  rest_api_id = aws_api_gateway_rest_api.lambda_api.id
+  parent_id   = aws_api_gateway_rest_api.lambda_api.root_resource_id
+  path_part   = "email-aliases"
+}
+
 # API Gateway Method (ANY dla root)
 resource "aws_api_gateway_method" "proxy_root" {
   rest_api_id   = aws_api_gateway_rest_api.lambda_api.id
@@ -110,6 +143,15 @@ resource "aws_api_gateway_method" "proxy" {
   rest_api_id   = aws_api_gateway_rest_api.lambda_api.id
   resource_id   = aws_api_gateway_resource.proxy.id
   http_method   = "ANY"
+  authorization = "NONE"
+  api_key_required = true
+}
+
+# API Gateway Method (POST dla email-aliases)
+resource "aws_api_gateway_method" "email_aliases" {
+  rest_api_id   = aws_api_gateway_rest_api.lambda_api.id
+  resource_id   = aws_api_gateway_resource.email_aliases.id
+  http_method   = "POST"
   authorization = "NONE"
   api_key_required = true
 }
@@ -136,11 +178,23 @@ resource "aws_api_gateway_integration" "lambda" {
   uri                    = aws_lambda_function.pdf_compressor.invoke_arn
 }
 
+# API Gateway Integration (email-aliases)
+resource "aws_api_gateway_integration" "email_aliases" {
+  rest_api_id = aws_api_gateway_rest_api.lambda_api.id
+  resource_id = aws_api_gateway_method.email_aliases.resource_id
+  http_method = aws_api_gateway_method.email_aliases.http_method
+
+  integration_http_method = "POST"
+  type                   = "AWS_PROXY"
+  uri                    = aws_lambda_function.email_aliases.invoke_arn
+}
+
 # API Gateway Deployment
 resource "aws_api_gateway_deployment" "lambda" {
   depends_on = [
     aws_api_gateway_integration.lambda,
     aws_api_gateway_integration.lambda_root,
+    aws_api_gateway_integration.email_aliases,
   ]
 
   rest_api_id = aws_api_gateway_rest_api.lambda_api.id
@@ -157,11 +211,20 @@ resource "aws_api_gateway_stage" "prod" {
   stage_name    = "prod"
 }
 
-# Lambda Permission dla API Gateway
-resource "aws_lambda_permission" "api_gateway" {
-  statement_id  = "AllowExecutionFromAPIGateway"
+# Lambda Permission dla API Gateway (PDF Compressor)
+resource "aws_lambda_permission" "api_gateway_pdf" {
+  statement_id  = "AllowExecutionFromAPIGatewayPDF"
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.pdf_compressor.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_api_gateway_rest_api.lambda_api.execution_arn}/*/*"
+}
+
+# Lambda Permission dla API Gateway (Email Aliases)
+resource "aws_lambda_permission" "api_gateway_aliases" {
+  statement_id  = "AllowExecutionFromAPIGatewayAliases"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.email_aliases.function_name
   principal     = "apigateway.amazonaws.com"
   source_arn    = "${aws_api_gateway_rest_api.lambda_api.execution_arn}/*/*"
 }
@@ -207,8 +270,13 @@ output "api_key" {
 }
 
 output "lambda_function_name" {
-  description = "Name of the Lambda function"
+  description = "Name of the PDF Compressor Lambda function"
   value       = aws_lambda_function.pdf_compressor.function_name
+}
+
+output "email_aliases_function_name" {
+  description = "Name of the Email Aliases Lambda function"
+  value       = aws_lambda_function.email_aliases.function_name
 }
 
 output "usage_plan_id" {
