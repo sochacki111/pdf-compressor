@@ -70,11 +70,11 @@ resource "aws_api_gateway_api_key" "pdf_compressor_key" {
 resource "aws_lambda_function" "pdf_compressor" {
   filename         = data.local_file.lambda_zip.filename
   function_name    = var.project_name
-  role            = aws_iam_role.lambda_role.arn
-  handler         = "src/features/pdf-compressor/lambda/index.handler"
-  runtime         = "nodejs18.x"
-  timeout         = 30
-  memory_size     = 512
+  role             = aws_iam_role.lambda_role.arn
+  handler          = "dist/pdf-compressor/lambda/index.handler"
+  runtime          = "nodejs18.x"
+  timeout          = 30
+  memory_size      = 512
 
   source_code_hash = filebase64sha256(data.local_file.lambda_zip.filename)
 
@@ -89,11 +89,11 @@ resource "aws_lambda_function" "pdf_compressor" {
 resource "aws_lambda_function" "email_aliases" {
   filename         = data.local_file.lambda_zip.filename
   function_name    = "${var.project_name}-email-aliases"
-  role            = aws_iam_role.lambda_role.arn
-  handler         = "src/features/email-aliases/lambda/index.handler"
-  runtime         = "nodejs18.x"
-  timeout         = 30
-  memory_size     = 256
+  role             = aws_iam_role.lambda_role.arn
+  handler          = "dist/email-aliases/lambda/index.handler"
+  runtime          = "nodejs18.x"
+  timeout          = 30
+  memory_size      = 256
 
   source_code_hash = filebase64sha256(data.local_file.lambda_zip.filename)
 
@@ -198,6 +198,25 @@ resource "aws_api_gateway_deployment" "lambda" {
   ]
 
   rest_api_id = aws_api_gateway_rest_api.lambda_api.id
+
+  triggers = {
+    redeploy_hash = sha1(jsonencode({
+      resources = [
+        aws_api_gateway_resource.proxy.id,
+        aws_api_gateway_resource.email_aliases.id,
+      ],
+      methods = [
+        aws_api_gateway_method.proxy_root.id,
+        aws_api_gateway_method.proxy.id,
+        aws_api_gateway_method.email_aliases.id,
+      ],
+      integrations = [
+        aws_api_gateway_integration.lambda.id,
+        aws_api_gateway_integration.lambda_root.id,
+        aws_api_gateway_integration.email_aliases.id,
+      ]
+    }))
+  }
 
   lifecycle {
     create_before_destroy = true

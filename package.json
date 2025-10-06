@@ -5,8 +5,9 @@
   "main": "index.js",
   "scripts": {
     "build": "tsc",
-    "package": "npm run build && cd dist && zip -r ../lambda-deployment.zip .",
-    "deploy": "npm run package && cd infra && terraform apply -auto-approve -var='ADDY_API_KEY=${ADDY_API_KEY}'",
+    "package": "npm run build && rm -f lambda-deployment.zip && zip -r lambda-deployment.zip dist node_modules package.json package-lock.json",
+    "deploy:old": "npm run package && cd infra && terraform apply -auto-approve -var='ADDY_API_KEY=${ADDY_API_KEY}'",
+    "deploy": "npm run package && cd infra && terraform apply -auto-approve",
     "deploy:env": "dotenv -- npm run deploy",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
