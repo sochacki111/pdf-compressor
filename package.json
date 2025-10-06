@@ -1,27 +1,25 @@
 {
-  "name": "pdf-compressor",
+  "name": "voucher-generator",
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
   "scripts": {
     "build": "tsc",
     "package": "npm run build && rm -f lambda-deployment.zip && zip -r lambda-deployment.zip dist node_modules package.json package-lock.json",
-    "deploy:old": "npm run package && cd infra && terraform apply -auto-approve -var='ADDY_API_KEY=${ADDY_API_KEY}'",
     "deploy": "npm run package && cd infra && terraform apply -auto-approve",
-    "deploy:env": "dotenv -- npm run deploy",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/sochacki111/pdf-compressor.git"
+    "url": "git+https://github.com/sochacki111/voucher-generator.git"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "bugs": {
-    "url": "https://github.com/sochacki111/pdf-compressor/issues"
+    "url": "https://github.com/sochacki111/voucher-generator/issues"
   },
-  "homepage": "https://github.com/sochacki111/pdf-compressor#readme",
+  "homepage": "https://github.com/sochacki111/voucher-generator#readme",
   "devDependencies": {
     "@eslint/js": "^9.36.0",
     "@types/node": "^24.6.2",

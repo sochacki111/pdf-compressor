@@ -5,7 +5,7 @@ const API_KEY = process.env.ADDY_API_KEY!;
 const BASE_URL = 'https://app.addy.io/api/v1';
 
 export const handler = async (event: APIGatewayEvent, context: Context) => {
-    console.log("Email Aliases Event:", JSON.stringify(event, null, 2));
+    console.log("Generate Email Alias Event:", JSON.stringify(event, null, 2));
     console.log("Context:", JSON.stringify(context, null, 2));
 
     try {
