@@ -1,0 +1,68 @@
+{
+  "Comment": "Voucher Generator Workflow: Generate Email Alias and Subscribe to Auchan Newsletter",
+  "StartAt": "GenerateEmailAlias",
+  "States": {
+    "GenerateEmailAlias": {
+      "Type": "Task",
+      "Resource": "${generate_email_alias_arn}",
+      "ResultPath": "$.aliasResult",
+      "Next": "ParseAliasResponse",
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.error",
+          "Next": "HandleError"
+        }
+      ]
+    },
+    "ParseAliasResponse": {
+      "Type": "Pass",
+      "Parameters": {
+        "body.$": "States.StringToJson($.aliasResult.body)"
+      },
+      "ResultPath": "$.parsedAlias",
+      "Next": "ExtractEmail"
+    },
+    "ExtractEmail": {
+      "Type": "Pass",
+      "Parameters": {
+        "email.$": "$.parsedAlias.body.alias.data.email",
+        "aliasData.$": "$.parsedAlias.body"
+      },
+      "ResultPath": "$.extracted",
+      "Next": "SubscribeAuchanNewsletter"
+    },
+    "SubscribeAuchanNewsletter": {
+      "Type": "Task",
+      "Resource": "${subscribe_auchan_arn}",
+      "InputPath": "$.extracted",
+      "ResultPath": "$.subscriptionResult",
+      "Next": "Success",
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.error",
+          "Next": "HandleError"
+        }
+      ]
+    },
+    "Success": {
+      "Type": "Pass",
+      "Parameters": {
+        "status": "SUCCESS",
+        "aliasCreated.$": "$.extracted.aliasData",
+        "subscriptionResult.$": "$.subscriptionResult"
+      },
+      "End": true
+    },
+    "HandleError": {
+      "Type": "Pass",
+      "Parameters": {
+        "status": "FAILED",
+        "error.$": "$.error"
+      },
+      "End": true
+    }
+  }
+}
+

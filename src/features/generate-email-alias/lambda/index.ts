@@ -2,31 +2,15 @@ import { APIGatewayEvent, Context } from 'aws-lambda';
 import axios from 'axios';
 
 const API_KEY = process.env.ADDY_API_KEY!;
-const BASE_URL = 'https://app.addy.io/api/v1';
+const BASE_URL = process.env.BASE_URL!;
 
-export const handler = async (event: APIGatewayEvent, context: Context) => {
+export const handler = async (event: APIGatewayEvent | any, context: Context) => {
     console.log("Generate Email Alias Event:", JSON.stringify(event, null, 2));
     console.log("Context:", JSON.stringify(context, null, 2));
 
     try {
-        const { alias } = JSON.parse(event.body || '{}');
-        if (!alias) {
-            return {
-                statusCode: 400,
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({ error: 'Alias is required' })
-            };
-        }
-
-        // Addy.io API expects 'description' field, not 'alias'
-        // If alias contains @, use only the local part (before @)
-        const aliasDescription = alias.includes('@') ? alias.split('@')[0] : alias;
-        
         const requestPayload = {
             domain: 'anonaddy.com',
-            description: aliasDescription,
             format: 'random_characters' // Options: 'uuid', 'random_characters', 'custom', 'random_words'
         };
 
