@@ -495,6 +495,64 @@ resource "aws_api_gateway_usage_plan_key" "main" {
   usage_plan_id = aws_api_gateway_usage_plan.main.id
 }
 
+# IAM Role dla EventBridge do uruchamiania Step Function
+resource "aws_iam_role" "eventbridge_step_function_role" {
+  name = "${var.project_name}-eventbridge-step-function-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "events.amazonaws.com"
+        }
+      }
+    ]
+  })
+}
+
+# Policy dla EventBridge do uruchamiania Step Function
+resource "aws_iam_role_policy" "eventbridge_step_function_policy" {
+  name = "${var.project_name}-eventbridge-step-function-policy"
+  role = aws_iam_role.eventbridge_step_function_role.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "states:StartExecution"
+        ]
+        Resource = aws_sfn_state_machine.voucher_workflow.arn
+      }
+    ]
+  })
+}
+
+# EventBridge Rule - uruchamia workflow codziennie o 10:00 UTC (przed 12:00 czasu polskiego)
+resource "aws_cloudwatch_event_rule" "daily_voucher_workflow" {
+  name                = "${var.project_name}-daily-trigger"
+  description         = "Trigger voucher workflow once daily before noon (10:00 UTC)"
+  schedule_expression = "cron(0 10 * * ? *)"
+  state               = "ENABLED"
+}
+
+# EventBridge Target - łączy regułę z Step Function
+resource "aws_cloudwatch_event_target" "voucher_workflow" {
+  rule     = aws_cloudwatch_event_rule.daily_voucher_workflow.name
+  arn      = aws_sfn_state_machine.voucher_workflow.arn
+  role_arn = aws_iam_role.eventbridge_step_function_role.arn
+
+  # Domyślny input dla codziennego uruchomienia
+  input = jsonencode({
+    source = "scheduled-daily"
+    triggeredAt = "$.time"
+  })
+}
+
 # Outputs
 output "api_gateway_url" {
   description = "URL of the API Gateway"
@@ -562,4 +620,14 @@ output "cloudwatch_log_group" {
 output "step_function_log_group" {
   description = "CloudWatch Log Group for Step Function logs"
   value       = aws_cloudwatch_log_group.step_function_logs.name
+}
+
+output "daily_schedule" {
+  description = "Daily schedule configuration for voucher workflow"
+  value = {
+    rule_name   = aws_cloudwatch_event_rule.daily_voucher_workflow.name
+    schedule    = aws_cloudwatch_event_rule.daily_voucher_workflow.schedule_expression
+    description = "Runs daily at 10:00 UTC (before noon Polish time)"
+    state       = aws_cloudwatch_event_rule.daily_voucher_workflow.state
+  }
 }
